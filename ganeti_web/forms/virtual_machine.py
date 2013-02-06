@@ -17,6 +17,7 @@
 
 from django import forms
 from django.contrib.formtools.wizard.views import CookieWizardView
+from django.conf import settings
 from django.core.urlresolvers import reverse
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db.models import Q
@@ -678,6 +679,28 @@ class VMWizardBasicsForm(Form):
     disk_size = DataVolumeField(label=_("Disk Size (MB)"),
                                 help_text=_(VM_CREATE_HELP['disk_size']))
 
+    def __init__(self, *args, **kwargs):
+        super(VMWizardBasicsForm, self).__init__(*args, **kwargs)
+        nic_count = settings.MAX_NICS_ADD
+        self.create_nic_fields(nic_count)
+
+    def create_nic_fields(self, count, defaults=None):
+        """
+        dynamically add fields for nics
+        """
+        self.nic_fields = range(count)
+        for i in range(count):
+            nic_mode = forms.ChoiceField(label=_('NIC/%s Mode' % i),
+                                         choices=HV_NIC_MODES,
+                                         required=False)
+            nic_link = forms.CharField(label=_('NIC/%s Link' % i),
+                                       max_length=255,
+                                       required=False)
+            if defaults is not None:
+                nic_link.initial = defaults['nic_link']
+            self.fields['nic_mode_%s'%i] = nic_mode
+            self.fields['nic_link_%s'%i] = nic_link
+
     def _configure_for_cluster(self, cluster):
         if not cluster:
             return
@@ -729,8 +752,24 @@ class VMWizardBasicsForm(Form):
         self.fields["vcpus"].initial = template.vcpus
         self.fields["memory"].initial = template.memory
         self.fields["disk_template"].initial = template.disk_template
+        for num, nic in enumerate(template.nics):
+            self.fields["nic_link_%s" % num].initial = nic['link']
+            self.fields["nic_mode_%s" % num].initial = nic['mode']
         # XXX disk size
 
+    def clean(self):
+        data = self.cleaned_data
+        nics = []
+        for nic in xrange(settings.MAX_NICS_ADD):
+            link = data.get('nic_link_%s' % nic, None)
+            mode = data.get('nic_mode_%s' % nic, None)
+            # if both the mode and link for a NIC are filled out, add it to the
+            # nic list.
+            if link and mode:
+                nics.append({'link': link, 'mode': mode})
+
+        data['nics'] = nics
+        return data
 
 class VMWizardAdvancedForm(Form):
     ip_check = BooleanField(label=_('Verify IP'), initial=False,
@@ -1062,12 +1101,10 @@ class VMWizardView(LoginRequiredMixin, CookieWizardView):
             },
         ]
 
-        template.nics = [
-            {
-                "link": "br0",
-                "mode": "bridged",
-            },
-        ]
+        nics = forms[2].cleaned_data["nics"]
+        # default
+        if not nics: nics = [{"link": "br0", "mode": "bridged"}]
+        template.nics = nics
 
         template.os = forms[2].cleaned_data["os"]
         template.ip_check = forms[3].cleaned_data["ip_check"]
