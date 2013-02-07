@@ -688,7 +688,6 @@ class VMWizardBasicsForm(Form):
         """
         dynamically add fields for disks
         """
-        self.disk_fields = range(count)
         widget_attrs = {'class': 'multi multi_disks'}
         for i in range(count):
             disk_size = DataVolumeField(label=_("Disk/%s Size (MB)" % i),
