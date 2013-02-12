@@ -29,7 +29,12 @@ function multi_input(scope) {
     // Add click handlers to both buttons
     $add.click(function(e) {
         e.preventDefault();
-        first_hidden().show();
+        var first = first_hidden();
+        var group_num = $('.multi:not(.icon)', first).data('group')
+        var group = $("[data-group="+group_num+"]").filter($scope);
+        group.each(function(index) {
+            $(this).parents('tr').show();
+        });
         place_buttons();
     });
 
@@ -37,10 +42,10 @@ function multi_input(scope) {
         e.preventDefault();
         // Cache the last item so we dont recompute it multiple times
         var last = last_visible();
-        var group_num = $('.multi:not(.icon)', last).data('group')
+        var group_num = $('.multi:not(.icon)', last).data('group');
         // Do not hide/remove the only/first group.
         if (group_num == 0) { return; }
-        var group = $(".multi:not(.icon)[data-group="+group_num+"]")
+        var group = $(".multi:not(.icon)[data-group="+group_num+"]").filter($scope);
         group.each(function(index) {
             $(this).val('').parents('tr').hide();
         });

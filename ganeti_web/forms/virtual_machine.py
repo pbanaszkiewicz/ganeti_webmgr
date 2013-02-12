@@ -684,6 +684,9 @@ class VMWizardBasicsForm(Form):
         disk_count = settings.MAX_DISKS_ADD
         self.create_disk_fields(disk_count)
 
+        nic_count = settings.MAX_NICS_ADD
+        self.create_nic_fields(nic_count)
+
     def create_disk_fields(self, count):
         """
         dynamically add fields for disks
@@ -697,11 +700,6 @@ class VMWizardBasicsForm(Form):
             disk_size.widget.attrs['data-group'] = i
             self.fields['disk_size_%s' % i] = disk_size
 
-    def __init__(self, *args, **kwargs):
-        super(VMWizardBasicsForm, self).__init__(*args, **kwargs)
-        nic_count = settings.MAX_NICS_ADD
-        self.create_nic_fields(nic_count)
-
     def create_nic_fields(self, count, defaults=None):
         """
         dynamically add fields for nics
@@ -714,6 +712,11 @@ class VMWizardBasicsForm(Form):
             nic_link = forms.CharField(label=_('NIC/%s Link' % i),
                                        max_length=255,
                                        required=False)
+
+            nic_mode.widget.attrs['class'] = 'multi nic link'
+            nic_link.widget.attrs['class'] = 'multi nic mode'
+            nic_mode.widget.attrs['data-group'] = i
+            nic_link.widget.attrs['data-group'] = i
             if defaults is not None:
                 nic_link.initial = defaults['nic_link']
             self.fields['nic_mode_%s'%i] = nic_mode
