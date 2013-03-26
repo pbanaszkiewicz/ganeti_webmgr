@@ -631,6 +631,13 @@ class VMWizardOwnerForm(Form):
     hostname = CharField(label=_('Instance Name'), max_length=255,
                          required=False, help_text=_(VM_CREATE_HELP['hostname']))
 
+    def __init__(self, *args, **kwargs):
+        user = kwargs.pop('user', None)
+        super(VMWizardOwnerForm, self).__init__(*args, **kwargs)
+
+        if user:
+            self.fields['owner'].initial = user.pk
+
     def _configure_for_cluster(self, cluster):
         if not cluster:
             return
@@ -1077,7 +1084,7 @@ class VMWizardView(LoginRequiredMixin, CookieWizardView):
             # XXX this should somehow become totally invalid if the user
             # doesn't have perms on the template.
         elif s == 1:
-            form = VMWizardOwnerForm(data=data)
+            form = VMWizardOwnerForm(data=data, user=self.request.user)
             form._configure_for_cluster(self._get_cluster())
             form._configure_for_template(self._get_template(),
                                          choices=self._get_vm_or_template())
