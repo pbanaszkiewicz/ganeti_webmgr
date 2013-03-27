@@ -22,7 +22,7 @@ from django.contrib.auth.decorators import login_required
 import os
 from forms.autocomplete_search_form import autocomplete_search_form
 
-from ganeti_web.forms.virtual_machine import vm_wizard
+from ganeti_web.forms.virtual_machine import vm_wizard, VMWizardView
 from ganeti_web.views.cluster import (ClusterDetailView, ClusterListView,
                                       ClusterVMListView, ClusterJobListView)
 from ganeti_web.views.general import AboutView
@@ -162,9 +162,11 @@ urlpatterns += patterns('ganeti_web.views.node',
 )
 
 # VM add wizard
+
+VMWIZARDVM = {0: {'choices': [u'hostname']}}
 urlpatterns += patterns("ganeti_web.forms.virtual_machine",
-    url(r"^vm/add/?$", vm_wizard(initial_dict={0: {'choices': [u'hostname']}}),
-                                 name="instance-create"),
+    #url(r"^vm/add/?$", vm_wizard(initial_dict={0: {'choices': [u'hostname']}}), name="instance-create"),
+    url(r"^vm/add/?$", VMWizardView.as_view(initial_dict=VMWIZARDVM), name="instance-create"),
 )
 
 # VirtualMachines
@@ -230,20 +232,23 @@ urlpatterns += patterns('ganeti_web.views.virtual_machine',
 )
 
 # VirtualMachineTemplates
+VMWIZARDTEMPLATE = {0: {'choices': [u'template_name']}}
 template_prefix = '%s/template/%s' % (cluster, template)
 urlpatterns += patterns('ganeti_web.views.vm_template',
     # List
     url(r'^templates/$', 'templates', name='template-list'),
     # Create
     url(r'^template/create/$',
-        vm_wizard(initial_dict={0: {'choices': [u'template_name']}}),
-                  name='template-create'),
+        #vm_wizard(initial_dict={0: {'choices': [u'template_name']}}), name='template-create'),
+        VMWizardView.as_view(initial_dict=VMWIZARDTEMPLATE), name='template-create'),
     # Detail
     url(r'^%s/?$' % template_prefix, 'detail', name='template-detail'),
     # Delete
     url(r'^%s/delete/?$' % template_prefix, 'delete', name='template-delete'),
     # Edit
-    url(r'^%s/edit/?$' % template_prefix, vm_wizard(), name='template-edit'),
+    #url(r'^%s/edit/?$' % template_prefix, vm_wizard(), name='template-edit'),
+    url(r'^%s/edit/?$' % template_prefix, VMWizardView.as_view(
+        initial_dict=VMWIZARDTEMPLATE), name='template-edit'),
     # Copy
     url(r'^%s/copy/?$' % template_prefix, 'copy', name='template-copy'),
     # Create Instance from Template, and vice versa

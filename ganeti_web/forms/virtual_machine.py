@@ -21,6 +21,7 @@ from django.conf import settings
 from django.core.urlresolvers import reverse
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db.models import Q
+from django.utils.decorators import classonlymethod
 from django.forms import (Form, BooleanField, CharField, ChoiceField,
                           IntegerField, ModelChoiceField, ValidationError,
                           MultipleChoiceField, CheckboxSelectMultiple)
@@ -585,6 +586,10 @@ class VMWizardClusterForm(Form):
     cluster = ModelChoiceField(label=_('Cluster'),
                                queryset=Cluster.objects.all(),
                                empty_label=None)
+    choices = MultipleChoiceField(widget=CheckboxSelectMultiple,
+                                  label=_('What would you '
+                                          'like to create?'),
+                                  help_text=_(VM_CREATE_HELP['choices']))
 
     class Media:
         css = {
@@ -592,18 +597,14 @@ class VMWizardClusterForm(Form):
             'all': ('/static/css/vm_wizard/cluster_form.css',)
         }
 
-    def __init__(self, options=None, *args, **kwargs):
+    def __init__(self, options, user=None, *args, **kwargs):
         super(VMWizardClusterForm, self).__init__(*args, **kwargs)
-        if options:
-            self.fields['choices'] = MultipleChoiceField(
-                widget=CheckboxSelectMultiple,
-                choices=options,
-                initial=self.initial,
-                label=_('What would you '
-                        'like to create?'),
-                help_text=_(VM_CREATE_HELP['choices']))
+        self.fields['choices'].choices = options
+        self._configure_for_user(user)
 
     def _configure_for_user(self, user):
+        if not user:
+            return
         self.fields["cluster"].queryset = cluster_qs_for_user(user)
 
     def clean_cluster(self):
@@ -631,12 +632,15 @@ class VMWizardOwnerForm(Form):
     hostname = CharField(label=_('Instance Name'), max_length=255,
                          required=False, help_text=_(VM_CREATE_HELP['hostname']))
 
-    def __init__(self, *args, **kwargs):
-        user = kwargs.pop('user', None)
+    def __init__(self, cluster, user=None, *args, **kwargs):
+        choices = kwargs.pop("choices", None)
         super(VMWizardOwnerForm, self).__init__(*args, **kwargs)
 
-        if user:
+        self._configure_for_cluster(cluster)
+        if user:  # Default user to set owner field to. Usually request.user
             self.fields['owner'].initial = user.pk
+        if choices:
+            self._hide_unchecked(choices)
 
     def _configure_for_cluster(self, cluster):
         if not cluster:
@@ -647,17 +651,16 @@ class VMWizardOwnerForm(Form):
         qs = owner_qs_for_cluster(cluster)
         self.fields["owner"].queryset = qs
 
-    def _configure_for_template(self, template, choices=None):
-        # for each option not checked on step 0
-        if choices:
-            for field in choices:
-                # Hide it
-                self.fields[field].widget = forms.HiddenInput()
-
+    def _configure_for_template(self, template):
         if not template:
             return
 
         self.fields["template_name"].initial = template.template_name
+
+    def _hide_unchecked(self, unchecked):
+        """Hides all fields in options, that are not in choices"""
+        for option in unchecked:
+            self.fields[option].widget = forms.HiddenInput()
 
     def clean_hostname(self):
         hostname = self.cleaned_data.get('hostname')
@@ -701,15 +704,17 @@ class VMWizardBasicsForm(Form):
                                 choices=HV_DISK_TEMPLATES,
                                 help_text=_(VM_CREATE_HELP['disk_template']))
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, cluster, *args, **kwargs):
         super(VMWizardBasicsForm, self).__init__(*args, **kwargs)
-
         # Create disk and nic fields based on value in settings
         disk_count = settings.MAX_DISKS_ADD
         self.create_disk_fields(disk_count)
 
         nic_count = settings.MAX_NICS_ADD
         self.create_nic_fields(nic_count)
+
+        # This needs to happen after our nic/disk fields get created
+        self._configure_for_cluster(cluster)
 
     def create_disk_fields(self, count):
         """
@@ -864,6 +869,11 @@ class VMWizardAdvancedForm(Form):
                              queryset=Node.objects.all(), empty_label=None,
                              help_text=_(VM_CREATE_HELP['snode']))
 
+    def __init__(self, cluster, disk_template, *args, **kwargs):
+        super(VMWizardAdvancedForm, self).__init__(*args, **kwargs)
+        self._configure_for_cluster(cluster)
+        self._configure_for_disk_template(disk_template)
+
     def _configure_for_cluster(self, cluster):
         if not cluster:
             return
@@ -902,6 +912,10 @@ class VMWizardPVMForm(Form):
     kernel_path = CharField(label=_("Kernel path"), max_length=255)
     root_path = CharField(label=_("Root path"), max_length=255)
 
+    def __init__(self, cluster, *args, **kwargs):
+        super(VMWizardPVMForm, self).__init__(*args, **kwargs)
+        self._configure_for_cluster(cluster)
+
     def _configure_for_cluster(self, cluster):
         if not cluster:
             return
@@ -933,6 +947,10 @@ class VMWizardHVMForm(Form):
     nic_type = ChoiceField(label=_("NIC type"),
                            choices=HVM_CHOICES["nic_type"],
                            help_text=_(VM_CREATE_HELP['nic_type']))
+
+    def __init__(self, cluster, *args, **kwargs):
+        super(VMWizardHVMForm, self).__init__(*args, **kwargs)
+        self._configure_for_cluster(cluster)
 
     def _configure_for_cluster(self, cluster):
         if not cluster:
@@ -979,6 +997,10 @@ class VMWizardKVMForm(Form):
     nic_type = ChoiceField(label=_("NIC type"),
                            choices=KVM_CHOICES["nic_type"],
                            help_text=_(VM_CREATE_HELP['nic_type']))
+
+    def __init__(self, cluster, *args, **kwargs):
+        super(VMWizardKVMForm, self).__init__(*args, **kwargs)
+        self._configure_for_cluster(cluster)
 
     def _configure_for_cluster(self, cluster):
         if not cluster:
@@ -1033,20 +1055,29 @@ class VMWizardView(LoginRequiredMixin, CookieWizardView):
     OPTIONS = (
         # value, display value
         # value corresponds to VMWizardOwnerForm's fields
-        ('template_name', 'Template'),
-        ('hostname', 'Virtual Machine'),
+        (u'template_name', u'Template'),
+        (u'hostname', u'Virtual Machine'),
     )
 
-    def _get_vm_or_template(self):
+    @classonlymethod
+    def as_view(cls, *args, **kwargs):
+        form_list = (
+            VMWizardClusterForm,
+            VMWizardOwnerForm,
+            VMWizardBasicsForm,
+            VMWizardAdvancedForm,
+            Form
+        )
+        return super(VMWizardView, cls).as_view(form_list, *args, **kwargs)
+
+    def _get_unchecked_choices(self):
         """Returns items that were not checked in step0"""
         data = self.get_cleaned_data_for_step('0')
         if data:
+            choices = data.get('choices', [])
             options = [option[0] for option in self.OPTIONS]
-            choices = data.get('choices', None)
-            # which boxes weren't checked
             unchecked = set(options) - set(choices)
             return unchecked
-
         return None
 
     def _get_template(self):
@@ -1073,50 +1104,71 @@ class VMWizardView(LoginRequiredMixin, CookieWizardView):
             return data["disk_template"]
         return None
 
-    def get_form(self, step=None, data=None, files=None):
-        s = int(self.steps.current) if step is None else int(step)
-        initial = self.get_form_initial(s)
+    def get_form_initial(self, step):
+        initial = self.initial_dict.get(step, {})
+        template = self._get_template()
+        extra = {}
+        if step == 1:
+            pass
 
-        if s == 0:
-            form = VMWizardClusterForm(data=data, options=self.OPTIONS,
-                                       initial=initial)
-            form._configure_for_user(self.request.user)
-            # XXX this should somehow become totally invalid if the user
-            # doesn't have perms on the template.
-        elif s == 1:
-            form = VMWizardOwnerForm(data=data, user=self.request.user)
-            form._configure_for_cluster(self._get_cluster())
-            form._configure_for_template(self._get_template(),
-                                         choices=self._get_vm_or_template())
-        elif s == 2:
-            form = VMWizardBasicsForm(data=data)
-            form._configure_for_cluster(self._get_cluster())
-            form._configure_for_template(self._get_template())
-        elif s == 3:
-            form = VMWizardAdvancedForm(data=data)
-            form._configure_for_cluster(self._get_cluster())
-            form._configure_for_template(self._get_template())
-            form._configure_for_disk_template(self._get_disk_template())
-        elif s == 4:
-            cluster = self._get_cluster()
+        initial.update(extra)
+        return initial
+
+    def get_form_kwargs(self, step=None):
+        kwargs = {}
+        if step > 0:
+            kwargs.update({'cluster': self._get_cluster()})
+
+        if step == 0:
+            kwargs.update({
+                'options': self.OPTIONS,
+                'user': self.request.user,
+            })
+        elif step == 1:
+            kwargs.update({
+                'choices': self._get_unchecked_choices(),
+                'user': self.request.user,
+            })
+        elif step == 3:
+            kwargs.update({
+                'disk_template': self._get_disk_template(),
+            })
+        return kwargs
+
+    def get_form(self, step=None, data=None, files=None):
+        step = int(self.steps.current) if step is None else int(step)
+
+        kwargs = self.get_form_kwargs(step)
+        kwargs.update({
+            'data': data,
+            'files': files,
+            'initial': self.get_form_initial(step),
+        })
+
+        if step == 0:
+            form = VMWizardClusterForm(**kwargs)
+        elif step == 1:
+            form = VMWizardOwnerForm(**kwargs)
+        elif step == 2:
+            form = VMWizardBasicsForm(**kwargs)
+        elif step == 3:
+            form = VMWizardAdvancedForm(**kwargs)
+        elif step == 4:
+            # TODO: Make a generic Form for this step which does the hypervisor
+            # stuff and returns a form with all the correct stuff
             hv = self._get_hv()
             form = None
-
-            if cluster and hv:
-                if hv == "kvm":
-                    form = VMWizardKVMForm(data=data)
-                elif hv == "xen-pvm":
-                    form = VMWizardPVMForm(data=data)
-                elif hv == "xen-hvm":
-                    form = VMWizardHVMForm(data=data)
+            if hv == "kvm":
+                form = VMWizardKVMForm
+            elif hv == "xen-pvm":
+                form = VMWizardPVMForm
+            elif hv == "xen-hvm":
+                form = VMWizardHVMForm
 
             if form:
-                form._configure_for_cluster(cluster)
-                form._configure_for_template(self._get_template())
+                form = form(**kwargs)
             else:
                 form = Form()
-        else:
-            form = super(VMWizardView, self).get_form(step, data, files)
 
         return form
 
@@ -1161,7 +1213,7 @@ class VMWizardView(LoginRequiredMixin, CookieWizardView):
         # if unchecked, than we should make sure that this is not submitted.
         # this fixes cases where the user checked a box in the beginning, put
         # data into the input, and went back and unchecked that box later.
-        unchecked_options = self._get_vm_or_template()
+        unchecked_options = self._get_unchecked_choices()
         for unchecked in unchecked_options:
             if 'template_name' == unchecked:
                 template_name = ''
@@ -1224,5 +1276,4 @@ def vm_wizard(*args, **kwargs):
         VMWizardAdvancedForm,
         Form,
     )
-    initial = kwargs.get('initial_dict', None)
-    return VMWizardView.as_view(forms, initial_dict=initial)
+    return VMWizardView.as_view(forms, *args, **kwargs)
