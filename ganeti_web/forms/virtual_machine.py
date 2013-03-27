@@ -1106,11 +1106,9 @@ class VMWizardView(LoginRequiredMixin, CookieWizardView):
 
     def get_form_initial(self, step):
         initial = self.initial_dict.get(step, {})
-        template = self._get_template()
+        # template = self._get_template()
         extra = {}
-        if step == 1:
-            pass
-
+        # put extra initial data in here.
         initial.update(extra)
         return initial
 
@@ -1266,14 +1264,3 @@ class VMWizardView(LoginRequiredMixin, CookieWizardView):
             return HttpResponseRedirect(reverse("template-detail",
                                                 args=[cluster.slug,
                                                       template]))
-
-
-def vm_wizard(*args, **kwargs):
-    forms = (
-        VMWizardClusterForm,
-        VMWizardOwnerForm,
-        VMWizardBasicsForm,
-        VMWizardAdvancedForm,
-        Form,
-    )
-    return VMWizardView.as_view(forms, *args, **kwargs)
